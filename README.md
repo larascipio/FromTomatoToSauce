@@ -12,17 +12,17 @@ then saves it for browsing and ingredient-based search.
 
 ## Setup
 
+Requires [uv](https://docs.astral.sh/uv/).
+
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync                             # creates .venv and installs dependencies
 export MISTRAL_API_KEY="your-key"   # from console.mistral.ai
 ```
 
 ## Run
 
 ```sh
-uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 ```
 
 Open http://127.0.0.1:8000 in your browser, paste a recipe, and search by ingredients.
@@ -37,7 +37,6 @@ Open http://127.0.0.1:8000 in your browser, paste a recipe, and search by ingred
 | GET    | `/recipes/{id}`     | Fetch one recipe               |
 
 ## TO DO 
-- implement uv 
 - design front-end
 - design the back-end a bit more clearly
 - figure out how to host it for free and connect it to a database that can be accessed on prem
