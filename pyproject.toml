@@ -1,0 +1,9 @@
+[project]
+name = "fromtomatotosauce"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "mistralai>=3.0.0",
+    "psycopg[binary]>=3.3.6",
+    "streamlit>=1.64.0",
+]

@@ -40,7 +40,7 @@ def parse_recipe(text: str) -> dict:
     response = client.chat.complete(
         model=RECIPE_MODEL,
         messages=[{"role": "user", "content": PROMPT.format(text=text.strip())}],
-response_format={"type": "json_object"},
+        response_format={"type": "json_object"},
     )
 
     content = response.choices[0].message.content

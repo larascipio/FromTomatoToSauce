@@ -1,65 +1,69 @@
-import json
 import os
-import sqlite3
-from pathlib import Path
 
-DB_PATH = Path(os.environ.get("RECIPE_DB", "recipes.db"))
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS recipes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     title TEXT NOT NULL,
-    ingredients TEXT NOT NULL,
-    steps TEXT NOT NULL,
-    tags TEXT NOT NULL,
+    ingredients JSONB NOT NULL,
+    steps JSONB NOT NULL,
+    tags JSONB NOT NULL,
     source TEXT,
     raw_text TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 """
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_connection() -> psycopg.Connection:
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Add it to your environment "
+            "(e.g. export DATABASE_URL=postgresql://user:pass@host/dbname)."
+        )
+    return psycopg.connect(database_url, row_factory=dict_row)
 
 
 def init_db() -> None:
     with get_connection() as conn:
-        conn.executescript(SCHEMA)
+        conn.execute(SCHEMA)
 
 
 def insert_recipe(recipe: dict) -> int:
     with get_connection() as conn:
-        cur = conn.execute(
+        row = conn.execute(
             """
             INSERT INTO recipes (title, ingredients, steps, tags, source, raw_text)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (
                 recipe["title"],
-                json.dumps(recipe.get("ingredients", [])),
-                json.dumps(recipe.get("steps", [])),
-                json.dumps(recipe.get("tags", [])),
+                Jsonb(recipe.get("ingredients", [])),
+                Jsonb(recipe.get("steps", [])),
+                Jsonb(recipe.get("tags", [])),
                 recipe.get("source"),
                 recipe["raw_text"],
             ),
-        )
-        return cur.lastrowid
+        ).fetchone()
+    return row["id"]
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict:
+def _row_to_dict(row: dict | None) -> dict | None:
     if row is None:
         return None
     return {
         "id": row["id"],
         "title": row["title"],
-        "ingredients": json.loads(row["ingredients"]),
-        "steps": json.loads(row["steps"]),
-        "tags": json.loads(row["tags"]),
+        "ingredients": row["ingredients"],
+        "steps": row["steps"],
+        "tags": row["tags"],
         "source": row["source"],
-        "created_at": row["created_at"],
+        "created_at": row["created_at"].isoformat(),
     }
 
 
@@ -72,23 +76,27 @@ def list_recipes() -> list[dict]:
 def get_recipe(recipe_id: int) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM recipes WHERE id = ?", (recipe_id,)
+            "SELECT * FROM recipes WHERE id = %s", (recipe_id,)
         ).fetchone()
     return _row_to_dict(row)
 
 
 def search_recipes(query: str) -> list[dict]:
-    tokens = [t.strip().lower() for t in query.split() if t.strip()]
+    tokens = [t.strip() for t in query.split() if t.strip()]
     if not tokens:
         return list_recipes()
 
-    results = []
-    with get_connection() as conn:
-        rows = conn.execute("SELECT * FROM recipes ORDER BY id DESC").fetchall()
+    # Every token must appear in the title or somewhere in the ingredients.
+    conditions = " AND ".join(
+        "(title ILIKE %s OR ingredients::text ILIKE %s)" for _ in tokens
+    )
+    params = []
+    for t in tokens:
+        pattern = f"%{t}%"
+        params += [pattern, pattern]
 
-    for row in rows:
-        ingredients = " ".join(json.loads(row["ingredients"])).lower()
-        title = row["title"].lower()
-        if all(t in ingredients or t in title for t in tokens):
-            results.append(_row_to_dict(row))
-    return results
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM recipes WHERE {conditions} ORDER BY id DESC", params
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
